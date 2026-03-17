@@ -1,13 +1,15 @@
 <!DOCTYPE html>
+
 <html lang="en">
 
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AR Measure</title>
+<title>AR Floor Measure</title>
 
-<script src="https://cdn.8thwall.com/web/xrweb.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.150/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/webxr/ARButton.js"></script>
 
 <link rel="stylesheet" href="style.css">
 
@@ -15,14 +17,17 @@
 
 <body>
 
-<canvas id="camera-canvas"></canvas>
+<div class="top-info">
+<span id="distance">Distance: 0 m</span>
+<span id="area">Area: 0 m²</span>
+</div>
 
-<button id="back-btn" class="back-btn">← Back</button>
+<button class="back-btn" onclick="history.back()">← Back</button>
 
 <div class="ui-overlay">
-  <button id="undo-btn" class="btn">↶</button>
-  <button id="add-btn" class="btn add-btn">+</button>
-  <button id="clear-btn" class="btn">✕</button>
+<button id="undo" class="btn">↶</button>
+<button id="add" class="btn add-btn">+</button>
+<button id="clear" class="btn">✕</button>
 </div>
 
 <script src="app.js"></script>

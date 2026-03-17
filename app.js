@@ -1,132 +1,136 @@
-const measurePipelineModule = () => {
+let scene,camera,renderer
+let controller
+let hitTestSource=null
+let hitTestSourceRequested=false
 
-let scene
-let points = []
-let activeObjects = []
+let points=[]
+let objects=[]
 
-const createLabel = (text, position) => {
+scene=new THREE.Scene()
 
-const canvas = document.createElement('canvas')
-const ctx = canvas.getContext('2d')
+camera=new THREE.PerspectiveCamera(
+70,
+window.innerWidth/window.innerHeight,
+0.01,
+20
+)
 
-canvas.width = 256
-canvas.height = 64
+renderer=new THREE.WebGLRenderer({antialias:true,alpha:true})
+renderer.setSize(window.innerWidth,window.innerHeight)
+renderer.xr.enabled=true
 
-ctx.fillStyle = "rgba(0,0,0,0.6)"
-ctx.fillRect(0,0,256,64)
+document.body.appendChild(renderer.domElement)
 
-ctx.fillStyle = "white"
-ctx.font = "32px Arial"
-ctx.textAlign = "center"
-ctx.fillText(text,128,45)
+document.body.appendChild(
+THREE.ARButton.createButton(renderer,{requiredFeatures:['hit-test']})
+)
 
-const texture = new THREE.CanvasTexture(canvas)
-const material = new THREE.SpriteMaterial({map:texture})
+controller=renderer.xr.getController(0)
+scene.add(controller)
 
-const sprite = new THREE.Sprite(material)
-sprite.scale.set(0.2,0.05,1)
-sprite.position.copy(position)
+function createDot(pos){
 
-return sprite
+let dot=new THREE.Mesh(
+new THREE.SphereGeometry(0.01),
+new THREE.MeshBasicMaterial({color:0x007AFF})
+)
+
+dot.position.copy(pos)
+scene.add(dot)
+
+objects.push(dot)
+
 }
 
-const drawMeasurement = (p1,p2)=>{
+function drawLine(p1,p2){
 
-const dist = p1.distanceTo(p2)
+let geo=new THREE.BufferGeometry().setFromPoints([p1,p2])
 
-const lineGeo = new THREE.BufferGeometry().setFromPoints([p1,p2])
-const line = new THREE.Line(
-lineGeo,
+let line=new THREE.Line(
+geo,
 new THREE.LineBasicMaterial({color:0xffffff})
 )
 
 scene.add(line)
-activeObjects.push(line)
+objects.push(line)
 
-const mid = new THREE.Vector3().addVectors(p1,p2).multiplyScalar(0.5)
+let d=p1.distanceTo(p2)
 
-const label = createLabel(`${dist.toFixed(2)}m`,mid)
-scene.add(label)
-activeObjects.push(label)
+document.getElementById("distance").innerText=
+"Distance: "+d.toFixed(2)+" m"
 
 }
 
-const addPoint = ()=>{
+function calculateArea(){
 
-const hitTest = XR8.XrController.hitTest(0.5,0.5,['FEATURE_POINT','ESTIMATED_SURFACE'])
+if(points.length<3) return
 
-if(hitTest.length>0){
+let area=0
 
-const pos = hitTest[0].position
+for(let i=0;i<points.length;i++){
 
-const point = new THREE.Vector3(pos.x,pos.y,pos.z)
+let j=(i+1)%points.length
 
-const dot = new THREE.Mesh(
-new THREE.SphereGeometry(0.015),
-new THREE.MeshBasicMaterial({color:0x007AFF})
-)
+area+=points[i].x*points[j].z
+area-=points[j].x*points[i].z
 
-dot.position.copy(point)
+}
 
-scene.add(dot)
+area=Math.abs(area/2)
 
-points.push(point)
-activeObjects.push(dot)
+document.getElementById("area").innerText=
+"Area: "+area.toFixed(2)+" m²"
 
-if(points.length%2===0){
+}
 
-drawMeasurement(
+document.getElementById("add").onclick=()=>{
+
+let pos=new THREE.Vector3(0,0,-0.5)
+pos.applyMatrix4(camera.matrixWorld)
+
+points.push(pos)
+
+createDot(pos)
+
+if(points.length>1){
+
+drawLine(
 points[points.length-2],
 points[points.length-1]
 )
 
 }
 
-}
+calculateArea()
 
 }
 
-return{
+document.getElementById("undo").onclick=()=>{
 
-name:'measure-module',
+let obj=objects.pop()
 
-onStart:()=>{
-
-const xrScene = XR8.Threejs.xrScene()
-scene = xrScene.scene
-
-document.getElementById('add-btn').onclick = addPoint
-
-document.getElementById('undo-btn').onclick = ()=>{
-
-const obj = activeObjects.pop()
 if(obj) scene.remove(obj)
 
+points.pop()
+
+calculateArea()
+
 }
 
-document.getElementById('clear-btn').onclick = ()=>{
+document.getElementById("clear").onclick=()=>{
 
-activeObjects.forEach(o=>scene.remove(o))
-activeObjects=[]
+objects.forEach(o=>scene.remove(o))
+
+objects=[]
 points=[]
 
-}
-
-document.getElementById('back-btn').onclick = ()=>window.history.back()
-
-}
+document.getElementById("distance").innerText="Distance: 0 m"
+document.getElementById("area").innerText="Area: 0 m²"
 
 }
 
-}
+renderer.setAnimationLoop(()=>{
 
-XR8.addCameraPipelineModules([
-XR8.GlTextureRenderer.pipelineModule(),
-XR8.Threejs.pipelineModule(),
-XR8.XrController.pipelineModule(),
-measurePipelineModule()
-])
+renderer.render(scene,camera)
 
-XR8.run({
-canvas:document.getElementById("camera-canvas")
 })
