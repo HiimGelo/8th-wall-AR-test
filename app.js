@@ -344,18 +344,20 @@ window.addEventListener("pointerdown", (event) => {
 
   const intersects = raycaster.intersectObjects(scene.children, true)
 
-  if (intersects.length > 0) {
-    let obj = intersects[0].object
+// 🔥 ONLY allow UI clicks
+const uiHit = intersects.find(i => i.object.userData?.isUI)
 
-    // climb parent chain if needed
-    while (obj) {
-      if (obj.userData?.onClick) {
-        obj.userData.onClick()
-        return
-      }
-      obj = obj.parent
+if (uiHit) {
+  let obj = uiHit.object
+
+  while (obj) {
+    if (obj.userData?.onClick) {
+      obj.userData.onClick()
+      return
     }
+    obj = obj.parent
   }
+}
 })
 // -------- UI --------
 
@@ -407,11 +409,16 @@ function createButton(text, position, onClick) {
       transparent: true,
       depthTest: false,
       depthWrite: false
+      
     })
   )
+  
 
   mesh.position.copy(position)
   mesh.userData.onClick = onClick
+  mesh.userData.isUI = true
+  mesh.renderOrder = 999
+  
 
   mesh.visible = false // 🔥 hidden by default
 
