@@ -22,6 +22,8 @@ let scene = new THREE.Scene()
 let camera = new THREE.PerspectiveCamera()
 let renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true })
 
+scene.add(camera)
+
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.xr.enabled = !isIOS
 document.body.appendChild(renderer.domElement)
@@ -260,8 +262,14 @@ renderer.setAnimationLoop((t,frame)=>{
 
   reticle.matrix.setPosition(camPos)
   reticle.lookAt(camPos.clone().add(camDir))
-}
-}
+}}
+renderer.xr.addEventListener("sessionstart", () => {
+  const session = renderer.xr.getSession()
+
+  session.addEventListener("select", () => {
+    handleTap()
+  })
+})
 
   renderer.render(scene,camera)
 })
@@ -350,79 +358,103 @@ window.addEventListener("pointerdown", (event) => {
   }
 })
 // -------- UI --------
-function initUI() {
-  console.log("UI initialized")
-  console.log(document.getElementById("placeBtn"))
 
-  const placeBtn = document.getElementById("placeBtn")
-  const undoBtn = document.getElementById("undoBtn")
-  const clearBtn = document.getElementById("clearBtn")
-  const confirmBtn = document.getElementById("confirmBtn")
-  const info = document.getElementById("info")
 
-  document.addEventListener("click", () => {
-  console.log("GLOBAL CLICK")
-})
-
-placeBtn.addEventListener("pointerdown", () => {
-  console.log("POINTER DOWN placeBtn")
-})
-
-  if (!placeBtn || !undoBtn || !clearBtn || !confirmBtn || !info) {
-    console.error("UI not found in DOM")
-    console.log({ placeBtn, undoBtn, clearBtn, confirmBtn, info })
-    return
-  }
-
-  window.info = info
-
-  placeBtn.addEventListener("click", () => {
-    console.log("PLUS clicked")
-    placePoint()
-  })
-
-  undoBtn.addEventListener("click", undo)
-  clearBtn.addEventListener("click", clearAll)
-  confirmBtn.addEventListener("click", confirmMeasurement)
-}
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initUI)
-} else {
-  initUI()
-}
-
+let arButtons = []
 function createButton(text, position, onClick) {
+    const size = 256
   const canvas = document.createElement("canvas")
   const ctx = canvas.getContext("2d")
 
-  canvas.width = 256
-  canvas.height = 128
+  canvas.width = size
+  canvas.height = size
 
-  ctx.fillStyle = "white"
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  const center = size / 2
+  const radius = size / 2 - 10
 
+  // 🔥 Shadow (soft iOS look)
+  ctx.shadowColor = "rgba(0,0,0,0.4)"
+  ctx.shadowBlur = 20
+
+  // 🔥 Circle background
+  ctx.beginPath()
+  ctx.arc(center, center, radius, 0, Math.PI * 2)
+  ctx.closePath()
+  ctx.fillStyle = "rgba(255,255,255,0.9)"
+  ctx.fill()
+
+  // 🔥 Border (optional subtle)
+  ctx.lineWidth = 4
+  ctx.strokeStyle = "rgba(0,0,0,0.1)"
+  ctx.stroke()
+
+  // 🔥 Reset shadow for text
+  ctx.shadowBlur = 0
+
+  // 🔥 Text / icon
   ctx.fillStyle = "black"
-  ctx.font = "30px Arial"
-  ctx.fillText(text, 50, 70)
+  ctx.font = "bold 80px Arial"
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+  ctx.fillText(text, center, center)
 
   const texture = new THREE.CanvasTexture(canvas)
 
   const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.3, 0.15),
-    new THREE.MeshBasicMaterial({ map: texture })
+    new THREE.CircleGeometry(0.12, 64), // 🔥 round geometry
+    new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false
+    })
   )
 
-  camera.add(mesh)
   mesh.position.copy(position)
   mesh.userData.onClick = onClick
-  
 
-  scene.add(mesh)
+  mesh.visible = false // 🔥 hidden by default
+
+  camera.add(mesh)
+  arButtons.push(mesh)
+
+  return mesh
 }
 
 createButton("+", new THREE.Vector3(0, -0.2, -1), placePoint)
-createButton("Undo", new THREE.Vector3(0.4, -0.2, -1), undo)
-createButton("Clear", new THREE.Vector3(0.8, -0.2, -1), clearAll)
-createButton("Confirm", new THREE.Vector3(-0.4, -0.2, -1), confirmMeasurement)
+createButton("↺", new THREE.Vector3(-0.3, -0.2, -1), undo)
+createButton("x", new THREE.Vector3(-0.6, -0.2, -1), clearAll)
+createButton("✓", new THREE.Vector3(0.3, -0.2, -1), confirmMeasurement)
 
+renderer.xr.addEventListener("sessionstart", () => {
+  console.log("AR STARTED")
+
+  arButtons.forEach(btn => btn.visible = true)
+})
+
+renderer.xr.addEventListener("sessionend", () => {
+  console.log("AR ENDED")
+
+  arButtons.forEach(btn => btn.visible = false)
+})
+function handleTap(event) {
+  // center of screen tap (XR style)
+  tap.x = 0
+  tap.y = 0
+
+  raycaster.setFromCamera(tap, camera)
+
+  const intersects = raycaster.intersectObjects(scene.children, true)
+
+  if (intersects.length > 0) {
+    let obj = intersects[0].object
+
+    while (obj) {
+      if (obj.userData?.onClick) {
+        obj.userData.onClick()
+        return
+      }
+      obj = obj.parent
+    }
+  }
+}
