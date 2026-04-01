@@ -1,136 +1,393 @@
-let scene,camera,renderer
-let controller
-let hitTestSource=null
-let hitTestSourceRequested=false
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js'
+import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/webxr/ARButton.js'
 
-let points=[]
-let objects=[]
+const params = new URLSearchParams(location.search)
+const productSize = "<?php echo $productSize; ?>"
+const productImg  = "<?php echo $productImg; ?>"
 
-scene=new THREE.Scene()
+const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
 
-camera=new THREE.PerspectiveCamera(
-70,
-window.innerWidth/window.innerHeight,
-0.01,
-20
-)
+// -------- CONFIG --------
+let TILE_SIZE_CM = 60
 
-renderer=new THREE.WebGLRenderer({antialias:true,alpha:true})
-renderer.setSize(window.innerWidth,window.innerHeight)
-renderer.xr.enabled=true
+if (productSize && productSize.includes("X")) {
+  const parts = productSize.split("X").map(Number)
+  TILE_SIZE_CM = parts[0]
+} // change dynamically later
+let scaleFactor = 1
+let calibrationMode = true
 
+// -------- THREE --------
+let scene = new THREE.Scene()
+let camera = new THREE.PerspectiveCamera()
+let renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true })
+
+renderer.setSize(window.innerWidth, window.innerHeight)
+renderer.xr.enabled = !isIOS
 document.body.appendChild(renderer.domElement)
 
-document.body.appendChild(
-THREE.ARButton.createButton(renderer,{requiredFeatures:['hit-test']})
+scene.add(new THREE.HemisphereLight(0xffffff,0xbbbbff,1))
+
+// -------- STATE --------
+let points=[], lines=[], labels=[]
+let tileMesh=null
+let lastPos=null
+const SNAP = 0.05
+
+// -------- RETICLE --------
+let reticle = new THREE.Group()
+
+const ring = new THREE.Mesh(
+  new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI/2),
+  new THREE.MeshBasicMaterial({ color: 0xffffff })
 )
 
-controller=renderer.xr.getController(0)
-scene.add(controller)
-
-function createDot(pos){
-
-let dot=new THREE.Mesh(
-new THREE.SphereGeometry(0.01),
-new THREE.MeshBasicMaterial({color:0x007AFF})
+const dot = new THREE.Mesh(
+  new THREE.SphereGeometry(0.01, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0xff0000 })
 )
 
-dot.position.copy(pos)
-scene.add(dot)
+reticle.add(ring)
+reticle.add(dot)
 
-objects.push(dot)
-
+reticle.visible = false
+scene.add(reticle)
+reticle.matrixAutoUpdate = false
+// -------- XR SETUP --------
+if (!isIOS) {
+  document.body.appendChild(
+    ARButton.createButton(renderer,{requiredFeatures:['hit-test']})
+  )
 }
 
-function drawLine(p1,p2){
-
-let geo=new THREE.BufferGeometry().setFromPoints([p1,p2])
-
-let line=new THREE.Line(
-geo,
-new THREE.LineBasicMaterial({color:0xffffff})
-)
-
-scene.add(line)
-objects.push(line)
-
-let d=p1.distanceTo(p2)
-
-document.getElementById("distance").innerText=
-"Distance: "+d.toFixed(2)+" m"
-
+// -------- HELPERS --------
+function smooth(pos){
+  if(!lastPos) return pos
+  return lastPos.clone().lerp(pos,0.7)
 }
 
-function calculateArea(){
-
-if(points.length<3) return
-
-let area=0
-
-for(let i=0;i<points.length;i++){
-
-let j=(i+1)%points.length
-
-area+=points[i].x*points[j].z
-area-=points[j].x*points[i].z
-
+function snap(pos){
+  for(let p of points){
+    if(p.position.distanceTo(pos)<SNAP) return p.position.clone()
+  }
+  return pos
 }
 
-area=Math.abs(area/2)
+function label(text,pos){
+  const c=document.createElement('canvas')
+  const ctx=c.getContext('2d')
+  c.width=200; c.height=80
+  ctx.fillStyle="white"; ctx.fillRect(0,0,200,80)
+  ctx.fillStyle="black"; ctx.fillText(text,20,50)
 
-document.getElementById("area").innerText=
-"Area: "+area.toFixed(2)+" m²"
-
+  const tex=new THREE.CanvasTexture(c)
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex}))
+  s.scale.set(0.2,0.1,1)
+  s.position.copy(pos)
+  return s
 }
 
-document.getElementById("add").onclick=()=>{
+// -------- PLACE --------
+let calibPoints=[]
 
-let pos=new THREE.Vector3(0,0,-0.5)
-pos.applyMatrix4(camera.matrixWorld)
+function placePoint(){
+  let pos=new THREE.Vector3()
 
-points.push(pos)
+  if(!isIOS && reticle.visible){
+    pos.setFromMatrixPosition(reticle.matrix)
+  }else{
+    camera.getWorldPosition(pos)
+    pos.add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(1.2))
+    pos.y-=0.3
+  }
 
-createDot(pos)
+  pos=snap(pos)
+  lastPos=pos.clone()
 
-if(points.length>1){
-
-drawLine(
-points[points.length-2],
-points[points.length-1]
-)
-
+  // -------- CALIBRATION --------
+  if (calibrationMode) {
+  info.innerText = "Calibrate: tap 2 points on a known size"
+} else if (points.length < 2) {
+  info.innerText = "Tap to start measuring"
+} else {
+  info.innerText = "Continue placing points"
 }
 
-calculateArea()
+  // -------- ADD POINT --------
+  const p=new THREE.Mesh(
+    new THREE.SphereGeometry(0.01),
+    new THREE.MeshBasicMaterial({color:0xff0000})
+  )
+  p.position.copy(pos)
+  scene.add(p)
+  points.push(p)
 
+  if(points.length>=2){
+    const a=points[points.length-2].position
+    const b=points[points.length-1].position
+
+    const line=new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([a,b]),
+      new THREE.LineBasicMaterial()
+    )
+    scene.add(line)
+    lines.push(line)
+
+    const dist=a.distanceTo(b)*scaleFactor
+
+    const l=label(dist.toFixed(2)+"m",
+      a.clone().add(b).multiplyScalar(0.5)
+    )
+    scene.add(l)
+    labels.push(l)
+  }
+
+  updateTile()
 }
 
-document.getElementById("undo").onclick=()=>{
+// -------- TILE + AREA --------
+function updateTile(){
+  if(tileMesh) scene.remove(tileMesh)
+  if(points.length<3) return
 
-let obj=objects.pop()
+  const shape=new THREE.Shape(
+    points.map(p=>new THREE.Vector2(p.position.x,p.position.z))
+  )
 
-if(obj) scene.remove(obj)
+  const geo=new THREE.ShapeGeometry(shape)
 
-points.pop()
+  const tex = new THREE.TextureLoader().load(productImg || 'fallback.jpg')
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping
 
-calculateArea()
+  const sizeMeters = TILE_SIZE_CM / 100
+  tex.repeat.set(1/sizeMeters,1/sizeMeters)
 
+  tileMesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({
+    map:tex, side:THREE.DoubleSide
+  }))
+  tileMesh.rotation.x=-Math.PI/2
+
+  scene.add(tileMesh)
+
+  showArea()
 }
 
-document.getElementById("clear").onclick=()=>{
+// -------- AREA --------
+function showArea(){
+  let area=0
+  for(let i=0;i<points.length;i++){
+    const j=(i+1)%points.length
+    area+=points[i].position.x*points[j].position.z
+    area-=points[j].position.x*points[i].position.z
+  }
+  area=Math.abs(area/2)*scaleFactor
 
-objects.forEach(o=>scene.remove(o))
+  const tiles = area / Math.pow(TILE_SIZE_CM/100,2)
 
-objects=[]
-points=[]
-
-document.getElementById("distance").innerText="Distance: 0 m"
-document.getElementById("area").innerText="Area: 0 m²"
-
+  info.innerText =
+    "Area: "+area.toFixed(2)+" m² | Tiles: "+Math.ceil(tiles)
 }
 
-renderer.setAnimationLoop(()=>{
+// -------- CONFIRM --------
+function confirmMeasurement(){
+  if(points.length < 3) {
+    alert("Place at least 3 points")
+    return
+  }
 
-renderer.render(scene,camera)
+  // 📸 TAKE SCREENSHOT FIRST
+  takeScreenshot()
 
+  // -------- EXISTING LOGIC --------
+  let edges = []
+
+  for(let i=0;i<points.length;i++){
+    const a = points[i].position
+    const b = points[(i+1)%points.length].position
+    edges.push(a.distanceTo(b) * scaleFactor)
+  }
+
+  edges.sort((a,b)=>b-a)
+
+  const length = edges[0]
+  const width  = edges[1]
+
+  sendToParent(length, width)
+}
+
+// -------- XR LOOP --------
+let hitSource=null, requested=false
+
+renderer.setAnimationLoop((t,frame)=>{
+  if (frame) {
+  const session = renderer.xr.getSession()
+  const ref = renderer.xr.getReferenceSpace()
+
+  if (!requested) {
+    session.requestReferenceSpace('viewer').then(s => {
+      session.requestHitTestSource({ space: s }).then(src => hitSource = src)
+    })
+    requested = true
+  }
+
+  let placed = false
+
+  if (hitSource) {
+    const hits = frame.getHitTestResults(hitSource)
+
+    if (hits.length) {
+      const pose = hits[0].getPose(ref)
+
+      reticle.visible = true
+      reticle.matrixAutoUpdate = false
+      reticle.matrix.fromArray(pose.transform.matrix)
+
+      placed = true
+    }
+  }
+
+  // ✅ Emulator + fallback mode
+  if (!placed) {
+  const camPos = new THREE.Vector3()
+  const camDir = new THREE.Vector3()
+
+  camera.getWorldPosition(camPos)
+  camera.getWorldDirection(camDir)
+
+  camPos.add(camDir.multiplyScalar(1.2))
+
+  reticle.visible = true
+
+  reticle.matrix.setPosition(camPos)
+  reticle.lookAt(camPos.clone().add(camDir))
+}
+}
+
+  renderer.render(scene,camera)
 })
+
+// -------- UNDO / CLEAR --------
+function undo(){
+  if(points.length) scene.remove(points.pop())
+  if(lines.length) scene.remove(lines.pop())
+  if(labels.length) scene.remove(labels.pop())
+}
+
+function clearAll(){
+  points.forEach(p=>scene.remove(p))
+  lines.forEach(l=>scene.remove(l))
+  labels.forEach(l=>scene.remove(l))
+  points=[]; lines=[]; labels=[]
+}
+
+function sendToParent(length, width) {
+
+  const data = {
+    type: 'ar-measurement',
+    length: parseFloat(length.toFixed(2)),
+    width: parseFloat(width.toFixed(2)),
+    productId: params.get('id'),
+    session: params.get('session')
+  }
+
+  // ✅ Try postMessage first
+  if (window.opener && !window.opener.closed) {
+    window.opener.postMessage(data, "*")
+    alert("Measurement sent!")
+    window.close()
+    return
+  }
+
+  // ✅ Fallback redirect
+  const url = `ProductDetails.php?id=${data.productId}&length=${data.length}&width=${data.width}`
+  window.location.href = url
+}
+
+function takeScreenshot() {
+  // Force render before capture
+  renderer.render(scene, camera)
+
+  try {
+    const dataURL = renderer.domElement.toDataURL("image/png")
+
+    const confirmSave = confirm("Do you want to save this screenshot?")
+
+    if (confirmSave) {
+      const link = document.createElement("a")
+      link.href = dataURL
+      link.download = "ar-measurement.png"
+      link.click()
+    }
+
+  } catch (err) {
+    console.error("Screenshot failed:", err)
+    alert("Screenshot not supported on this device.")
+  }
+}
+
+const raycaster = new THREE.Raycaster()
+const tap = new THREE.Vector2()
+
+window.addEventListener("pointerdown", (event) => {
+  tap.x = (event.clientX / window.innerWidth) * 2 - 1
+  tap.y = -(event.clientY / window.innerHeight) * 2 + 1
+
+  raycaster.setFromCamera(tap, camera)
+
+  const intersects = raycaster.intersectObjects(scene.children, true)
+
+  if (intersects.length > 0) {
+    let obj = intersects[0].object
+
+    // climb parent chain if needed
+    while (obj) {
+      if (obj.userData?.onClick) {
+        obj.userData.onClick()
+        return
+      }
+      obj = obj.parent
+    }
+  }
+})
+// -------- UI --------
+function initUI() {
+  console.log("UI initialized")
+  console.log(document.getElementById("placeBtn"))
+
+  const placeBtn = document.getElementById("placeBtn")
+  const undoBtn = document.getElementById("undoBtn")
+  const clearBtn = document.getElementById("clearBtn")
+  const confirmBtn = document.getElementById("confirmBtn")
+  const info = document.getElementById("info")
+
+  document.addEventListener("click", () => {
+  console.log("GLOBAL CLICK")
+})
+
+placeBtn.addEventListener("pointerdown", () => {
+  console.log("POINTER DOWN placeBtn")
+})
+
+  if (!placeBtn || !undoBtn || !clearBtn || !confirmBtn || !info) {
+    console.error("UI not found in DOM")
+    console.log({ placeBtn, undoBtn, clearBtn, confirmBtn, info })
+    return
+  }
+
+  window.info = info
+
+  placeBtn.addEventListener("click", () => {
+    console.log("PLUS clicked")
+    placePoint()
+  })
+
+  undoBtn.addEventListener("click", undo)
+  clearBtn.addEventListener("click", clearAll)
+  confirmBtn.addEventListener("click", confirmMeasurement)
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initUI)
+} else {
+  initUI()
+}

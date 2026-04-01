@@ -1,58 +1,53 @@
-body{
-margin:0;
-overflow:hidden;
-font-family:Arial;
+body { margin:0; overflow:hidden; font-family:Arial; }
+
+#ui {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10000;
+  pointer-events: auto;
 }
 
-.top-info{
-position:absolute;
-top:20px;
-left:50%;
-transform:translateX(-50%);
-background:rgba(0,0,0,0.5);
-color:white;
-padding:10px 20px;
-border-radius:10px;
-z-index:10;
-display:flex;
-gap:20px;
+canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1;
 }
 
-.ui-overlay{
-position:absolute;
-bottom:30px;
-left:0;
-right:0;
-display:flex;
-justify-content:space-around;
-z-index:10;
+canvas {
+  pointer-events: none;
 }
 
-.btn{
-background:white;
-border:none;
-border-radius:50%;
-width:60px;
-height:60px;
-font-size:20px;
-box-shadow:0 4px 10px rgba(0,0,0,0.3);
+button {
+  padding: 12px 14px;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 25px;
+  backdrop-filter: blur(10px);
+  margin: 50px;
+  font-weight: 700;
+  font-size: 16px;
 }
 
-.add-btn{
-background:#007AFF;
-color:white;
-width:80px;
-height:80px;
-font-size:30px;
+#info {
+  position: fixed;
+  top:20px;
+  width:100%;
+  text-align:center;
+  color:white;
 }
 
-.back-btn{
-position:absolute;
-top:20px;
-left:20px;
-padding:10px 20px;
-background:rgba(0,0,0,0.5);
-color:white;
-border:none;
-border-radius:10px;
+#ARButton {
+  position: fixed;
+  top: 350px !important;
+  right: 910px !important;
+  bottom: 350px !important;
+  z-index: 9;
+  height: 50px;
+  margin: 0px;
+  color: black !important;
+  font-weight: 700 !important;
+  font-size: 14px !important;
 }
