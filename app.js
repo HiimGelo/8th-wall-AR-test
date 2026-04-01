@@ -391,3 +391,38 @@ if (document.readyState === "loading") {
 } else {
   initUI()
 }
+
+function createButton(text, position, onClick) {
+  const canvas = document.createElement("canvas")
+  const ctx = canvas.getContext("2d")
+
+  canvas.width = 256
+  canvas.height = 128
+
+  ctx.fillStyle = "white"
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+  ctx.fillStyle = "black"
+  ctx.font = "30px Arial"
+  ctx.fillText(text, 50, 70)
+
+  const texture = new THREE.CanvasTexture(canvas)
+
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.3, 0.15),
+    new THREE.MeshBasicMaterial({ map: texture })
+  )
+
+  camera.add(mesh)
+  mesh.position.copy(position)
+  mesh.userData.onClick = onClick
+  
+
+  scene.add(mesh)
+}
+
+createButton("+", new THREE.Vector3(0, -0.2, -1), placePoint)
+createButton("Undo", new THREE.Vector3(0.4, -0.2, -1), undo)
+createButton("Clear", new THREE.Vector3(0.8, -0.2, -1), clearAll)
+createButton("Confirm", new THREE.Vector3(-0.4, -0.2, -1), confirmMeasurement)
+
