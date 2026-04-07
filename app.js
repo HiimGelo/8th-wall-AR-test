@@ -7,8 +7,10 @@ const productImg  = "<?php echo $productImg; ?>"
 
 const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
 
+let iosControls;
 if (isIOS) {
-  startIOSCamera()
+  startIOSCamera();
+  iosControls = new DeviceOrientationControls(camera);
 }
 async function startIOSCamera() {
   const video = document.createElement("video")
@@ -137,10 +139,7 @@ if (!isIOS) {
 }
 
 // -------- HELPERS --------
-function smooth(pos){
-  if(!lastPos) return pos
-  return lastPos.clone().lerp(pos,0.7)
-}
+
 
 function snap(pos){
   for(let p of points){
@@ -153,18 +152,58 @@ function snap(pos){
   return pos
 }
 
-function label(text,pos){
-  const c=document.createElement('canvas')
-  const ctx=c.getContext('2d')
-  c.width=200; c.height=80
-  ctx.fillStyle="white"; ctx.fillRect(0,0,200,80)
-  ctx.fillStyle="black"; ctx.fillText(text,20,50)
+function label(text, pos) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  
+  // Set high resolution for crisp text
+  canvas.width = 512;
+  canvas.height = 256;
 
-  const tex=new THREE.CanvasTexture(c)
-  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex}))
-  s.scale.set(0.2,0.1,1)
-  s.position.copy(pos)
-  return s
+  // Draw Background Pill
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'; // Semi-transparent dark gray
+  const x = 64, y = 64, w = 384, h = 128, r = 64; // dimensions
+  
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+
+  // Draw Text
+  ctx.fillStyle = "white";
+  ctx.font = "bold 60px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  
+  // Add a slight drop shadow to text for extra depth
+  ctx.shadowColor = "black";
+  ctx.shadowBlur = 4;
+  
+  ctx.fillText(text, 256, 128);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.anisotropy = 16; // Keeps text sharp at angles
+  
+  const spriteMat = new THREE.SpriteMaterial({ 
+    map: tex, 
+    transparent: true,
+    depthTest: false // Ensures label is always visible over the lines
+  });
+  
+  const s = new THREE.Sprite(spriteMat);
+  s.scale.set(0.4, 0.2, 1); // Adjusted aspect ratio for the pill shape
+  s.position.copy(pos);
+  s.position.y += 0.05; // Hover slightly above the line
+  
+  return s;
 }
 
 // -------- PLACE --------
@@ -207,10 +246,6 @@ function placePoint(){
 pos = snap(pos)
 pos = smartSnap(pos)
 
-// ✅ ADD SMOOTHING HERE
-if (lastPos) {
-  pos.lerp(lastPos, 0.7)
-}
 
 lastPos = pos.clone()
 
@@ -338,87 +373,105 @@ function confirmMeasurement(){
 }
 
 // -------- XR LOOP --------
-let hitSource=null, requested=false
+let hitSource = null, requested = false
 
-renderer.setAnimationLoop((t,frame)=>{
+renderer.setAnimationLoop((t, frame) => {
+  // 1. Update iOS Camera Controls
+  if (isIOS && iosControls) {
+    iosControls.update();
+  }
+
+  // 2. Handle Android AR Frame
   if (frame) {
-  const session = renderer.xr.getSession()
-  const ref = renderer.xr.getReferenceSpace()
+    const session = renderer.xr.getSession()
+    const ref = renderer.xr.getReferenceSpace()
 
-  if (!requested) {
-    session.requestReferenceSpace('viewer').then(s => {
-      session.requestHitTestSource({ space: s }).then(src => hitSource = src)
-    })
-    requested = true
-  }
-
-  let placed = false
-
-  if (hitSource) {
-    const hits = frame.getHitTestResults(hitSource)
-
-    if (hits.length) {
-      const pose = hits[0].getPose(ref)
-
-      reticle.visible = true
-      reticle.matrixAutoUpdate = false
-      reticle.matrix.fromArray(pose.transform.matrix)
-
-      placed = true
+    if (!requested) {
+      session.requestReferenceSpace('viewer').then(s => {
+        session.requestHitTestSource({ space: s }).then(src => hitSource = src)
+      })
+      requested = true
     }
+
+    let placed = false
+
+    if (hitSource) {
+      const hits = frame.getHitTestResults(hitSource)
+      if (hits.length) {
+        const pose = hits[0].getPose(ref)
+        reticle.visible = true
+        reticle.matrixAutoUpdate = false
+        reticle.matrix.fromArray(pose.transform.matrix)
+        placed = true
+      }
+    }
+
+    // Emulator + fallback mode
+    if (!placed) {
+      const camPos = new THREE.Vector3()
+      const camDir = new THREE.Vector3()
+      camera.getWorldPosition(camPos)
+      camera.getWorldDirection(camDir)
+      camPos.add(camDir.multiplyScalar(1.2))
+      
+      reticle.visible = true
+      reticle.matrix.setPosition(camPos)
+      reticle.lookAt(camPos.clone().add(camDir))
+    }
+  } // <-- Closes if (frame)
+
+  // 3. Live Preview Line (Runs for both iOS and Android)
+  if (points.length > 0) {
+    let currentPos = new THREE.Vector3()
+
+    if (isIOS) {
+      currentPos.copy(getIOSPlacementPosition())
+    } else if (reticle.visible) {
+      currentPos.setFromMatrixPosition(reticle.matrix)
+    }
+
+    const last = points[points.length - 1].position
+    previewLine.geometry.setFromPoints([last, currentPos])
+    previewLine.computeLineDistances()
+    previewPoint.position.copy(currentPos)
   }
 
-  // ✅ Emulator + fallback mode
-  if (!placed) {
-  const camPos = new THREE.Vector3()
-  const camDir = new THREE.Vector3()
+  if (points.length === 0) {
+    previewLine.visible = false
+    previewPoint.visible = false
+  } else {
+    previewLine.visible = true
+    previewPoint.visible = true
+  }
 
-  camera.getWorldPosition(camPos)
-  camera.getWorldDirection(camDir)
+  // 4. Render Scene
+  renderer.render(scene, camera)
+}) // <--- ANIMATION LOOP ENDS HERE. NOTHING ELSE GOES INSIDE THIS.
 
-  camPos.add(camDir.multiplyScalar(1.2))
 
-  reticle.visible = true
+// -------- XR EVENT LISTENERS (OUTSIDE THE LOOP) --------
 
-  reticle.matrix.setPosition(camPos)
-  reticle.lookAt(camPos.clone().add(camDir))
-}}
 renderer.xr.addEventListener("sessionstart", () => {
+  console.log("AR STARTED")
   const session = renderer.xr.getSession()
-
+  
   session.addEventListener("select", () => {
     handleTap()
   })
+  
+  arButtons.forEach(btn => btn.visible = true)
 })
 
-  // -------- LIVE PREVIEW --------
-if (points.length > 0) {
-  let currentPos = new THREE.Vector3()
-
-  if (isIOS) {
-    currentPos.copy(getIOSPlacementPosition())
-  } else if (reticle.visible) {
-    currentPos.setFromMatrixPosition(reticle.matrix)
-  }
-
-  const last = points[points.length - 1].position
-
-  previewLine.geometry.setFromPoints([last, currentPos])
-  previewLine.computeLineDistances()
-
-  previewPoint.position.copy(currentPos)
-}
-
-if (points.length === 0) {
-  previewLine.visible = false
-  previewPoint.visible = false
-} else {
-  previewLine.visible = true
-  previewPoint.visible = true
-}
-
-  renderer.render(scene,camera)
+renderer.xr.addEventListener("sessionend", () => {
+  console.log("AR ENDED")
+  arButtons.forEach(btn => btn.visible = false)
 })
+
+// -------- iOS BUTTON FIX --------
+// Runs immediately on page load, completely independent of WebXR
+if (isIOS) {
+  arButtons.forEach(btn => btn.visible = true)
+}
 
 // -------- UNDO / CLEAR --------
 function undo(){
@@ -583,6 +636,9 @@ renderer.xr.addEventListener("sessionstart", () => {
   console.log("AR STARTED")
 
   arButtons.forEach(btn => btn.visible = true)
+  if (isIOS) {
+  arButtons.forEach(btn => btn.visible = true);
+}
 })
 
 renderer.xr.addEventListener("sessionend", () => {
