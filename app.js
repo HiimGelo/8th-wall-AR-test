@@ -36,7 +36,24 @@ async function startIOSCamera() {
     alert("Camera access denied")
   }
 }
+function getIOSPlacementPosition() {
+  const pos = new THREE.Vector3()
+  const dir = new THREE.Vector3()
 
+  camera.getWorldPosition(pos)
+  camera.getWorldDirection(dir)
+
+  // 🔥 fixed distance from camera
+  const distance = 1.2 + (points.length * 0.02)
+
+  pos.add(dir.multiplyScalar(distance))
+
+  // 🔥 LOCK to flat ground plane
+  pos.y = -0.5   // ← adjust once, stays consistent
+
+  return pos
+}
+// -------- ANDROID --------
 // -------- CONFIG --------
 let TILE_SIZE_CM = 60
 
@@ -46,6 +63,7 @@ if (productSize && productSize.includes("X")) {
 } // change dynamically later
 let scaleFactor = 1
 let calibrationMode = true
+let calibrationPoints = []
 
 // -------- THREE --------
 let scene = new THREE.Scene()
@@ -64,7 +82,11 @@ scene.add(new THREE.HemisphereLight(0xffffff,0xbbbbff,1))
 let points=[], lines=[], labels=[]
 let tileMesh=null
 let lastPos=null
+let previewLine = null
+let previewPoint = null
 const SNAP = 0.05
+
+
 
 // -------- RETICLE --------
 let reticle = new THREE.Group()
@@ -85,6 +107,28 @@ reticle.add(dot)
 reticle.visible = false
 scene.add(reticle)
 reticle.matrixAutoUpdate = false
+
+// -------- PREVIEW LINE --------
+const previewMaterial = new THREE.LineDashedMaterial({
+  color: 0xffffff,
+  dashSize: 0.05,
+  gapSize: 0.03
+})
+
+previewLine = new THREE.Line(
+  new THREE.BufferGeometry(),
+  previewMaterial
+)
+
+scene.add(previewLine)
+
+previewPoint = new THREE.Mesh(
+  new THREE.SphereGeometry(0.008),
+  new THREE.MeshBasicMaterial({ color: 0xffffff })
+)
+
+scene.add(previewPoint)
+
 // -------- XR SETUP --------
 if (!isIOS) {
   document.body.appendChild(
@@ -100,7 +144,11 @@ function smooth(pos){
 
 function snap(pos){
   for(let p of points){
-    if(p.position.distanceTo(pos)<SNAP) return p.position.clone()
+    const dx = Math.abs(p.position.x - pos.x)
+    const dz = Math.abs(p.position.z - pos.z)
+
+    if (dx < SNAP) pos.x = p.position.x
+    if (dz < SNAP) pos.z = p.position.z
   }
   return pos
 }
@@ -120,23 +168,55 @@ function label(text,pos){
 }
 
 // -------- PLACE --------
-let calibPoints=[]
 
 function placePoint(){
   let pos=new THREE.Vector3()
 
-  if(!isIOS && reticle.visible){
+   // ✅ SET POSITION FIRST
+  if (isIOS) {
+    pos.copy(getIOSPlacementPosition())
+  } else if (reticle.visible) {
     pos.setFromMatrixPosition(reticle.matrix)
-  }else{
-    camera.getWorldPosition(pos)
-    pos.add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(1.2))
-    pos.y-=0.3
   }
 
-  pos=snap(pos)
-  lastPos=pos.clone()
+  if (isIOS && calibrationMode) {
+  calibrationPoints.push(pos.clone())
+
+  if (calibrationPoints.length === 2) {
+    const measured = calibrationPoints[0].distanceTo(calibrationPoints[1])
+
+    const realDistance = parseFloat(
+      prompt("Enter real distance in METERS (example: 0.6)")
+    )
+
+    if (!isNaN(realDistance) && realDistance > 0) {
+  scaleFactor = realDistance / measured
+  alert("Calibration complete ✅")
+} else {
+  alert("Invalid input")
+}
+
+    calibrationMode = false
+    calibrationPoints = []
+
+    alert("Calibration complete ✅")
+  }
+
+  return
+}
+pos = snap(pos)
+pos = smartSnap(pos)
+
+// ✅ ADD SMOOTHING HERE
+if (lastPos) {
+  pos.lerp(lastPos, 0.7)
+}
+
+lastPos = pos.clone()
 
   // -------- CALIBRATION --------
+
+
   if (calibrationMode) {
   info.innerText = "Calibrate: tap 2 points on a known size"
 } else if (points.length < 2) {
@@ -192,7 +272,17 @@ function updateTile(){
   tex.wrapS=tex.wrapT=THREE.RepeatWrapping
 
   const sizeMeters = TILE_SIZE_CM / 100
-  tex.repeat.set(1/sizeMeters,1/sizeMeters)
+  const box = new THREE.Box3().setFromPoints(
+  points.map(p => new THREE.Vector3(p.position.x, 0, p.position.z))
+)
+
+const size = new THREE.Vector3()
+box.getSize(size)
+
+tex.repeat.set(
+  size.x / sizeMeters,
+  size.z / sizeMeters
+)
 
   tileMesh=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({
     map:tex, side:THREE.DoubleSide
@@ -300,6 +390,32 @@ renderer.xr.addEventListener("sessionstart", () => {
     handleTap()
   })
 })
+
+  // -------- LIVE PREVIEW --------
+if (points.length > 0) {
+  let currentPos = new THREE.Vector3()
+
+  if (isIOS) {
+    currentPos.copy(getIOSPlacementPosition())
+  } else if (reticle.visible) {
+    currentPos.setFromMatrixPosition(reticle.matrix)
+  }
+
+  const last = points[points.length - 1].position
+
+  previewLine.geometry.setFromPoints([last, currentPos])
+  previewLine.computeLineDistances()
+
+  previewPoint.position.copy(currentPos)
+}
+
+if (points.length === 0) {
+  previewLine.visible = false
+  previewPoint.visible = false
+} else {
+  previewLine.visible = true
+  previewPoint.visible = true
+}
 
   renderer.render(scene,camera)
 })
@@ -495,3 +611,29 @@ function handleTap(event) {
     }
   }
 }
+
+function smartSnap(pos) {
+  for (let p of points) {
+    const dx = Math.abs(p.position.x - pos.x)
+    const dz = Math.abs(p.position.z - pos.z)
+
+    if (dx < 0.05) pos.x = p.position.x
+    if (dz < 0.05) pos.z = p.position.z
+  }
+
+  return pos
+}
+
+const shadow = new THREE.Mesh(
+  new THREE.CircleGeometry(0.2, 32),
+  new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    transparent: true,
+    opacity: 0.2
+  })
+)
+
+shadow.rotation.x = -Math.PI / 2
+shadow.position.y = -0.49
+
+scene.add(shadow)
