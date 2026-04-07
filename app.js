@@ -5,13 +5,12 @@ const params = new URLSearchParams(location.search)
 const productSize = "<?php echo $productSize; ?>"
 const productImg  = "<?php echo $productImg; ?>"
 
-const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+// XR Viewer supports WebXR on iOS — use the WebXR path for it, not the fallback
+const isXRViewer = /XRViewer|WebXRViewer/i.test(navigator.userAgent)
+const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) && !isXRViewer
 
+// iosControls is initialized later, after camera is defined
 let iosControls;
-if (isIOS) {
-  startIOSCamera();
-  iosControls = new DeviceOrientationControls(camera);
-}
 async function startIOSCamera() {
   const video = document.createElement("video")
   video.setAttribute("autoplay", "")
@@ -73,6 +72,15 @@ let camera = new THREE.PerspectiveCamera()
 let renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true })
 
 scene.add(camera)
+
+// ✅ Initialize iOS camera + DeviceOrientationControls AFTER camera is defined
+if (isIOS) {
+  startIOSCamera()
+  iosControls = new DeviceOrientationControls(camera)
+}
+
+// ✅ Declare arButtons early so all listeners and the iOS show-fix below can access it
+let arButtons = []
 
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.xr.enabled = !isIOS
@@ -229,15 +237,13 @@ function placePoint(){
     )
 
     if (!isNaN(realDistance) && realDistance > 0) {
-  scaleFactor = realDistance / measured
-  alert("Calibration complete ✅")
-} else {
-  alert("Invalid input")
-}
+      scaleFactor = realDistance / measured
+    } else {
+      alert("Invalid input — calibration reset")
+    }
 
     calibrationMode = false
     calibrationPoints = []
-
     alert("Calibration complete ✅")
   }
 
@@ -450,28 +456,7 @@ renderer.setAnimationLoop((t, frame) => {
 
 
 // -------- XR EVENT LISTENERS (OUTSIDE THE LOOP) --------
-
-renderer.xr.addEventListener("sessionstart", () => {
-  console.log("AR STARTED")
-  const session = renderer.xr.getSession()
-  
-  session.addEventListener("select", () => {
-    handleTap()
-  })
-  
-  arButtons.forEach(btn => btn.visible = true)
-})
-
-renderer.xr.addEventListener("sessionend", () => {
-  console.log("AR ENDED")
-  arButtons.forEach(btn => btn.visible = false)
-})
-
-// -------- iOS BUTTON FIX --------
-// Runs immediately on page load, completely independent of WebXR
-if (isIOS) {
-  arButtons.forEach(btn => btn.visible = true)
-}
+// (consolidated below, after button creation)
 
 // -------- UNDO / CLEAR --------
 function undo(){
@@ -560,8 +545,6 @@ if (uiHit) {
 })
 // -------- UI --------
 
-
-let arButtons = []
 function createButton(text, position, onClick) {
     const size = 256
   const canvas = document.createElement("canvas")
@@ -632,20 +615,28 @@ createButton("↺", new THREE.Vector3(-0.3, -0.2, -1), undo)
 createButton("x", new THREE.Vector3(-0.6, -0.2, -1), clearAll)
 createButton("✓", new THREE.Vector3(0.3, -0.2, -1), confirmMeasurement)
 
+// -------- XR EVENT LISTENERS --------
 renderer.xr.addEventListener("sessionstart", () => {
   console.log("AR STARTED")
+  const session = renderer.xr.getSession()
+
+  session.addEventListener("select", () => {
+    handleTap()
+  })
 
   arButtons.forEach(btn => btn.visible = true)
-  if (isIOS) {
-  arButtons.forEach(btn => btn.visible = true);
-}
 })
 
 renderer.xr.addEventListener("sessionend", () => {
   console.log("AR ENDED")
-
   arButtons.forEach(btn => btn.visible = false)
 })
+
+// -------- iOS BUTTON FIX --------
+// Buttons are now created above, so this runs after arButtons is populated
+if (isIOS) {
+  arButtons.forEach(btn => btn.visible = true)
+}
 function handleTap(event) {
   // center of screen tap (XR style)
   tap.x = 0
