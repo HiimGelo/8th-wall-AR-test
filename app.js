@@ -7,6 +7,36 @@ const productImg  = "<?php echo $productImg; ?>"
 
 const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
 
+if (isIOS) {
+  startIOSCamera()
+}
+async function startIOSCamera() {
+  const video = document.createElement("video")
+  video.setAttribute("autoplay", "")
+  video.setAttribute("muted", "")
+  video.setAttribute("playsinline", "")
+
+  video.style.position = "fixed"
+  video.style.top = "0"
+  video.style.left = "0"
+  video.style.width = "100%"
+  video.style.height = "100%"
+  video.style.objectFit = "cover"
+  video.style.zIndex = "-1"
+
+  document.body.appendChild(video)
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" }
+    })
+
+    video.srcObject = stream
+  } catch (err) {
+    alert("Camera access denied")
+  }
+}
+
 // -------- CONFIG --------
 let TILE_SIZE_CM = 60
 
