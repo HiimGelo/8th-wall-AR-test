@@ -610,10 +610,10 @@ function createButton(text, position, onClick) {
   return mesh
 }
 
-createButton("+", new THREE.Vector3(0, -0.2, -1), placePoint)
-createButton("↺", new THREE.Vector3(-0.3, -0.2, -1), undo)
-createButton("x", new THREE.Vector3(-0.6, -0.2, -1), clearAll)
-createButton("✓", new THREE.Vector3(0.3, -0.2, -1), confirmMeasurement)
+createButton("+", new THREE.Vector3(0, -0.2, -0.5), placePoint)
+createButton("↺", new THREE.Vector3(-0.3, -0.2, -0.5), undo)
+createButton("x", new THREE.Vector3(-0.6, -0.2, -0.5), clearAll)
+createButton("✓", new THREE.Vector3(0.3, -0.2, -0.5), confirmMeasurement)
 
 // -------- XR EVENT LISTENERS --------
 renderer.xr.addEventListener("sessionstart", () => {
